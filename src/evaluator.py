@@ -1,17 +1,15 @@
 """
-ارزیابی تصاویر طراحی داخلی با استفاده از Claude Vision
-Evaluate interior design images using Claude Vision
+ارزیابی دستی تصاویر توسط کاربر
+Manual user evaluation of generated images — no external API needed
 """
 
-import anthropic
-import base64
-import json
-from pathlib import Path
-from typing import Optional
 from dataclasses import dataclass
+from typing import Optional
 from rich.console import Console
-
-from config import ANTHROPIC_MODEL, EVALUATION_CRITERIA
+from rich.panel import Panel
+from rich.table import Table
+from rich.prompt import IntPrompt
+from rich import box
 
 console = Console()
 
@@ -23,186 +21,110 @@ class EvaluationScore:
     model_name: str
     prompt_text: str
     image_path: str
-    design_coherence: float
-    interior_quality: float
-    aesthetic_appeal: float
-    technical_quality: float
-    usability: float
+    image_url: str
     total_score: float
-    reasoning: str
     concept: str
+    reasoning: str = ""
+
+    # معیارهای جزئی (اختیاری — در حالت دستی همه برابر total هستند)
+    design_coherence: float = 0.0
+    interior_quality: float = 0.0
+    aesthetic_appeal: float = 0.0
+    technical_quality: float = 0.0
+    usability: float = 0.0
 
 
-def _encode_image(image_path: str) -> str:
-    """تبدیل تصویر به base64 برای ارسال به Claude"""
-    with open(image_path, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("utf-8")
-
-
-def evaluate_image(
-    image_path: str,
-    prompt_text: str,
+def evaluate_images_manually(
+    generation_results: list,
     concept: str,
-    format_name: str,
-    model_name: str,
-    api_key: str,
-) -> Optional[EvaluationScore]:
+) -> list[EvaluationScore]:
     """
-    ارزیابی یک تصویر طراحی داخلی با Claude Vision
-    Evaluate a single interior design image using Claude Vision
+    نمایش URL تصاویر و دریافت امتیاز دستی از کاربر
+    Show image URLs and collect user ratings (1-10)
     """
-    client = anthropic.Anthropic(api_key=api_key)
+    successful = [r for r in generation_results if r.success and r.image_url]
 
-    try:
-        image_data = _encode_image(image_path)
-    except Exception as e:
-        console.print(f"[red]Failed to read image {image_path}: {e}[/red]")
-        return None
+    if not successful:
+        console.print("[red]No successful images to evaluate.[/red]")
+        return []
 
-    evaluation_prompt = f"""You are an expert interior design critic and AI image evaluation specialist.
+    console.print(Panel(
+        "[bold cyan]Manual Evaluation[/bold cyan]\n\n"
+        "Open each image URL in your browser and rate it from 1 to 10.\n"
+        "[dim]1 = poor  |  5 = acceptable  |  10 = excellent[/dim]",
+        border_style="cyan",
+    ))
 
-Evaluate this AI-generated interior design image against the following concept and prompt.
+    scores = []
 
-Original Concept: "{concept}"
-Prompt Used ({format_name}): "{prompt_text}"
+    for i, result in enumerate(successful, 1):
+        from src.prompt_generator import FORMAT_DESCRIPTIONS
+        fmt_desc = FORMAT_DESCRIPTIONS.get(result.format_name, result.format_name)
 
-Score each criterion from 0 to 10:
+        console.print(f"\n[bold]Image {i} of {len(successful)}[/bold]")
+        console.print(f"  Model:  [cyan]{result.model_name}[/cyan]")
+        console.print(f"  Format: [magenta]{result.format_name}[/magenta] — [dim]{fmt_desc}[/dim]")
+        console.print(f"  URL:    [link={result.image_url}]{result.image_url}[/link]")
+        console.print(f"  [dim]Prompt: {result.prompt_text[:100]}...[/dim]" if len(result.prompt_text) > 100 else f"  [dim]Prompt: {result.prompt_text}[/dim]")
 
-1. Design Coherence (0-10): How well does the image match the stated concept and prompt?
-2. Interior Design Quality (0-10): Professionalism, realistic proportions, proper furniture arrangement, spatial awareness?
-3. Aesthetic Appeal (0-10): Is the composition beautiful and visually pleasing?
-4. Technical Quality (0-10): Lighting quality, detail level, photorealism, rendering quality?
-5. Usability (0-10): Would a real client approve this? Is it practical and inspiring?
-
-Return ONLY a valid JSON object with this exact structure:
-{{
-  "design_coherence": <number 0-10>,
-  "interior_quality": <number 0-10>,
-  "aesthetic_appeal": <number 0-10>,
-  "technical_quality": <number 0-10>,
-  "usability": <number 0-10>,
-  "reasoning": "<brief 2-3 sentence explanation of scores and what works/doesn't work>"
-}}
-
-Return ONLY the JSON. No markdown, no explanation, just the JSON object."""
-
-    try:
-        response = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=500,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": image_data,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": evaluation_prompt,
-                        },
-                    ],
-                }
-            ],
+        rating = IntPrompt.ask(
+            "  [bold yellow]Your rating (1-10)[/bold yellow]",
+            default=5,
         )
+        rating = max(1, min(10, rating))
 
-        response_text = response.content[0].text.strip()
-
-        # پاک کردن markdown احتمالی
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
-
-        scores = json.loads(response_text)
-
-        total = (
-            scores["design_coherence"]
-            + scores["interior_quality"]
-            + scores["aesthetic_appeal"]
-            + scores["technical_quality"]
-            + scores["usability"]
-        ) / 5.0
-
-        return EvaluationScore(
-            format_name=format_name,
-            model_name=model_name,
-            prompt_text=prompt_text,
-            image_path=image_path,
-            design_coherence=scores["design_coherence"],
-            interior_quality=scores["interior_quality"],
-            aesthetic_appeal=scores["aesthetic_appeal"],
-            technical_quality=scores["technical_quality"],
-            usability=scores["usability"],
-            total_score=round(total, 2),
-            reasoning=scores["reasoning"],
+        scores.append(EvaluationScore(
+            format_name=result.format_name,
+            model_name=result.model_name,
+            prompt_text=result.prompt_text,
+            image_path=result.image_path or "",
+            image_url=result.image_url,
+            total_score=float(rating),
             concept=concept,
-        )
+            design_coherence=float(rating),
+            interior_quality=float(rating),
+            aesthetic_appeal=float(rating),
+            technical_quality=float(rating),
+            usability=float(rating),
+        ))
 
-    except Exception as e:
-        console.print(f"[red]Evaluation failed for {format_name}/{model_name}: {e}[/red]")
-        return None
+    return scores
 
 
 def display_evaluation_results(scores: list[EvaluationScore]) -> None:
-    """نمایش نتایج ارزیابی به صورت جدول رتبه‌بندی‌شده"""
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich import box
-
+    """نمایش نتایج ارزیابی رتبه‌بندی‌شده"""
     sorted_scores = sorted(scores, key=lambda s: s.total_score, reverse=True)
 
     table = Table(
-        title="Evaluation Results — Ranked by Total Score",
+        title="Results — Ranked by Your Rating",
         box=box.ROUNDED,
         border_style="cyan",
         show_lines=True,
     )
-
     table.add_column("Rank", justify="center", style="bold")
     table.add_column("Model", style="cyan", no_wrap=True)
     table.add_column("Format", style="magenta")
-    table.add_column("Coherence", justify="center")
-    table.add_column("Quality", justify="center")
-    table.add_column("Aesthetics", justify="center")
-    table.add_column("Technical", justify="center")
-    table.add_column("Usability", justify="center")
-    table.add_column("TOTAL", justify="center", style="bold yellow")
+    table.add_column("Score", justify="center", style="bold yellow")
+    table.add_column("Image URL", style="dim")
 
     for i, s in enumerate(sorted_scores, 1):
-        rank_style = {1: "gold1", 2: "silver", 3: "dark_orange"}.get(i, "white")
-        rank = f"[{rank_style}]#{i}[/{rank_style}]"
-
-        def fmt(v):
-            color = "green" if v >= 7 else "yellow" if v >= 5 else "red"
-            return f"[{color}]{v:.1f}[/{color}]"
-
-        total_color = "green" if s.total_score >= 7 else "yellow" if s.total_score >= 5 else "red"
-
+        rank_label = {1: "[gold1]#1[/gold1]", 2: "[silver]#2[/silver]", 3: "[dark_orange]#3[/dark_orange]"}.get(i, f"#{i}")
+        color = "green" if s.total_score >= 7 else "yellow" if s.total_score >= 5 else "red"
         table.add_row(
-            rank,
+            rank_label,
             s.model_name,
             s.format_name,
-            fmt(s.design_coherence),
-            fmt(s.interior_quality),
-            fmt(s.aesthetic_appeal),
-            fmt(s.technical_quality),
-            fmt(s.usability),
-            f"[bold {total_color}]{s.total_score:.2f}[/bold {total_color}]",
+            f"[{color}]{s.total_score:.0f}/10[/{color}]",
+            s.image_url[:60] + "..." if len(s.image_url) > 60 else s.image_url,
         )
 
     console.print(table)
 
-    # نمایش توضیحات برنده
     if sorted_scores:
         best = sorted_scores[0]
         console.print(Panel(
-            f"[bold yellow]Winner: {best.model_name} + {best.format_name} (Score: {best.total_score:.2f}/10)[/bold yellow]\n"
-            f"[dim]{best.reasoning}[/dim]",
+            f"[bold yellow]Winner: {best.model_name} + {best.format_name} — {best.total_score:.0f}/10[/bold yellow]\n"
+            f"[dim]{best.image_url}[/dim]",
             title="Best Result",
             border_style="yellow",
         ))
