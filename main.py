@@ -1,94 +1,123 @@
 """
-سیستم بهینه‌سازی پرامپت طراحی داخلی
-Interior Design AI Image Generation Prompt Optimizer
-
-یافتن بهترین فرمت پرامپت برای هر مدل تولید تصویر در زمینه طراحی داخلی
+نقطه ورود اصلی سیستم بهینه‌سازی پرامپت طراحی داخلی
+Main entry point for the Interior Design Prompt Optimization System
 """
 
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Prompt
 
 # بارگذاری متغیرهای محیطی از فایل .env
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt, Confirm
+from rich.text import Text
+from rich.align import Align
+from rich import box
+from rich.rule import Rule
 
 console = Console()
 
-WELCOME_TEXT = """
-[bold cyan]Interior Design Prompt Optimizer[/bold cyan]
+WELCOME_BANNER = """
+ ██╗███╗   ██╗████████╗███████╗██████╗ ██╗ ██████╗ ██████╗
+ ██║████╗  ██║╚══██╔══╝██╔════╝██╔══██╗██║██╔═══██╗██╔══██╗
+ ██║██╔██╗ ██║   ██║   █████╗  ██████╔╝██║██║   ██║██████╔╝
+ ██║██║╚██╗██║   ██║   ██╔══╝  ██╔══██╗██║██║   ██║██╔══██╗
+ ██║██║ ╚████║   ██║   ███████╗██║  ██║██║╚██████╔╝██║  ██║
+ ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝  ╚═╝
 
-This system helps you discover the [bold]best prompt format[/bold] for AI image
-generation models in the field of [bold]interior design[/bold].
-
-How it works:
-  [magenta]1.[/magenta] You provide an interior design concept
-  [magenta]2.[/magenta] Claude generates 6 structurally different prompt formats
-  [magenta]3.[/magenta] Images are generated using selected Fal.ai models
-  [magenta]4.[/magenta] Claude Vision evaluates each result on 5 criteria
-  [magenta]5.[/magenta] You provide feedback to guide future optimization
-  [magenta]6.[/magenta] Over time, the system identifies which formats work best
-
-[dim]Prompt formats tested: Simple | Prose | Keywords | Technical | Style-First | Mood[/dim]
-[dim]Models available: flux-pro | flux-dev | flux-realism | sd3[/dim]
+   DESIGN PROMPT OPTIMIZER — Powered by Claude Vision + Fal.ai
 """
 
 
-def get_api_keys() -> tuple[str, str]:
-    """دریافت API Key‌ها از محیط یا کاربر"""
-    fal_key = os.environ.get("FAL_KEY", "")
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+def display_welcome() -> None:
+    """
+    نمایش صفحه خوش‌آمدگویی زیبا
+    Display the welcome screen with system explanation
+    """
+    console.print(Panel(
+        Align.center(Text(WELCOME_BANNER, style="bold cyan")),
+        border_style="cyan",
+        padding=(1, 2),
+    ))
 
-    if not fal_key:
-        console.print("\n[yellow]FAL_KEY not found in environment.[/yellow]")
-        fal_key = Prompt.ask("[cyan]Enter your Fal.ai API key[/cyan]", password=True)
+    console.print(Panel(
+        "[bold white]How this system works:[/bold white]\n\n"
+        "  [cyan]1.[/cyan] You provide an [bold]interior design concept[/bold]\n"
+        "  [cyan]2.[/cyan] Claude generates [bold]6 structurally different prompt formats[/bold]\n"
+        "     (natural language, prose, keywords, technical, style-first, mood-focused)\n"
+        "  [cyan]3.[/cyan] Each format is sent to [bold]multiple Fal.ai image models[/bold]\n"
+        "     (Flux Pro, Flux Dev, Flux Realism, Stable Diffusion 3)\n"
+        "  [cyan]4.[/cyan] [bold]Claude Vision[/bold] evaluates every image on 5 design criteria\n"
+        "  [cyan]5.[/cyan] Results are ranked and you can [bold]pick your favorites[/bold]\n"
+        "  [cyan]6.[/cyan] The system [bold]learns and refines[/bold] formats based on what worked\n\n"
+        "[bold]Goal:[/bold] Find which prompt FORMAT works best for which MODEL for interior design.",
+        title="[bold cyan]Interior Design Prompt Optimization System[/bold cyan]",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
 
-    if not anthropic_key:
-        console.print("\n[yellow]ANTHROPIC_API_KEY not found in environment.[/yellow]")
-        anthropic_key = Prompt.ask("[cyan]Enter your Anthropic API key[/cyan]", password=True)
 
-    if not fal_key or not anthropic_key:
-        console.print("[red]Both API keys are required. Exiting.[/red]")
+def _get_api_key(env_var: str, display_name: str, prompt_text: str) -> str:
+    """
+    دریافت API key از محیط یا از کاربر
+    Get API key from environment variable or prompt the user
+    """
+    key = os.environ.get(env_var, "").strip()
+    if key:
+        # نمایش بخشی از کلید برای تأیید
+        masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+        console.print(f"[green]✓ {display_name} loaded from environment ({masked})[/green]")
+        return key
+
+    console.print(f"\n[yellow]{display_name} not found in environment.[/yellow]")
+    console.print(f"[dim]Set {env_var} in your .env file or enter it now.[/dim]")
+
+    key = Prompt.ask(
+        f"[bold cyan]{prompt_text}[/bold cyan]",
+        password=True,
+    )
+
+    if not key.strip():
+        console.print(f"[red]Error: {display_name} cannot be empty.[/red]")
         sys.exit(1)
 
-    return fal_key, anthropic_key
+    return key.strip()
 
 
-def check_dependencies() -> bool:
-    """بررسی نصب بودن وابستگی‌های لازم"""
+def _check_dependencies() -> bool:
+    """
+    بررسی نصب بودن وابستگی‌های لازم
+    Check that all required packages are installed
+    """
     missing = []
+    packages = {
+        "anthropic": "anthropic",
+        "fal_client": "fal-client",
+        "rich": "rich",
+        "PIL": "Pillow",
+        "aiohttp": "aiohttp",
+        "dotenv": "python-dotenv",
+    }
 
-    try:
-        import fal_client
-    except ImportError:
-        missing.append("fal-client")
-
-    try:
-        import anthropic
-    except ImportError:
-        missing.append("anthropic")
-
-    try:
-        import rich
-    except ImportError:
-        missing.append("rich")
-
-    try:
-        import dotenv
-    except ImportError:
-        missing.append("python-dotenv")
+    for module, package in packages.items():
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(package)
 
     if missing:
         console.print(Panel(
-            f"[red]Missing required packages:[/red] {', '.join(missing)}\n\n"
-            "[yellow]Install with:[/yellow]\n"
-            f"[bold]pip install {' '.join(missing)}[/bold]\n\n"
-            "Or install all dependencies:\n"
-            "[bold]pip install -r requirements.txt[/bold]",
-            title="Missing Dependencies",
+            f"[red]Missing packages:[/red] {', '.join(missing)}\n\n"
+            f"[yellow]Install with:[/yellow]\n"
+            f"[bold]pip install {' '.join(missing)}[/bold]",
+            title="[red]Dependency Error[/red]",
             border_style="red",
         ))
         return False
@@ -96,21 +125,76 @@ def check_dependencies() -> bool:
     return True
 
 
-def main():
-    """نقطه ورود اصلی برنامه"""
-    console.print(Panel(WELCOME_TEXT, border_style="cyan", padding=(1, 2)))
+def _ensure_results_dir() -> None:
+    """اطمینان از وجود پوشه نتایج"""
+    results_dir = Path(__file__).parent / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-    if not check_dependencies():
+
+def main() -> None:
+    """
+    تابع اصلی — نقطه شروع برنامه
+    Main function — application entry point
+    """
+    # نمایش خوش‌آمدگویی
+    display_welcome()
+
+    # بررسی وابستگی‌ها
+    console.print(Rule("[dim]System Check[/dim]"))
+    if not _check_dependencies():
         sys.exit(1)
+    console.print("[green]✓ All dependencies installed[/green]")
 
-    fal_key, anthropic_key = get_api_keys()
+    # اطمینان از وجود پوشه نتایج
+    _ensure_results_dir()
+    console.print("[green]✓ Results directory ready[/green]")
 
-    console.print("\n[green]✓ API keys loaded successfully[/green]")
-    console.print("[dim]Starting optimization system...[/dim]\n")
+    # ── دریافت API Keys ────────────────────────────────────────────────────
+    console.print(Rule("[dim]API Configuration[/dim]"))
 
-    # اجرای حلقه بهینه‌سازی
-    from src.optimizer import run_optimization
-    run_optimization(fal_key=fal_key, anthropic_key=anthropic_key)
+    fal_key = _get_api_key(
+        env_var="FAL_KEY",
+        display_name="Fal.ai API Key",
+        prompt_text="Enter your FAL_KEY",
+    )
+
+    anthropic_key = _get_api_key(
+        env_var="ANTHROPIC_API_KEY",
+        display_name="Anthropic API Key",
+        prompt_text="Enter your ANTHROPIC_API_KEY",
+    )
+
+    # ── تست اتصال سریع ────────────────────────────────────────────────────
+    console.print(Rule("[dim]Starting Optimization[/dim]"))
+    console.print(
+        "\n[bold cyan]System ready![/bold cyan] "
+        "Starting the interior design prompt optimization loop...\n"
+    )
+
+    # ── اجرای حلقه اصلی بهینه‌سازی ──────────────────────────────────────
+    try:
+        from src.optimizer import run_optimization_loop
+        run_optimization_loop(fal_key=fal_key, anthropic_key=anthropic_key)
+    except KeyboardInterrupt:
+        console.print("\n\n[yellow]Session interrupted by user.[/yellow]")
+        console.print("[dim]Your results have been saved to results/history.json[/dim]")
+    except Exception as e:
+        console.print(Panel(
+            f"[red]Unexpected error:[/red] {e}\n\n"
+            "[dim]Check your API keys and network connection.[/dim]",
+            title="[red]Error[/red]",
+            border_style="red",
+        ))
+        raise
+
+    # ── پایان ─────────────────────────────────────────────────────────────
+    console.print(Panel(
+        "[bold cyan]Thank you for using the Interior Design Prompt Optimizer![/bold cyan]\n"
+        "[dim]Results saved to: results/history.json[/dim]\n"
+        "[dim]Generated images saved in: results/[/dim]",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
 
 
 if __name__ == "__main__":
